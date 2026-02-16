@@ -1,7 +1,5 @@
 const { Plugin, Notice, Modal, Setting, requestUrl, PluginSettingTab, TFile, TFolder, normalizePath, getLanguage, Platform } = require('obsidian');
 const crypto = require('crypto');
-let fsSafe = null;
-try { fsSafe = require('fs'); } catch (_) { fsSafe = null; }
 
 const API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 const INDEX_FILE_NAME = 'index.json';
