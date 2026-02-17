@@ -1532,14 +1532,15 @@ class YandexDiskSyncPlugin extends Plugin {
     const remoteMap = new Map(remote.map((x) => [x.rel, x]));
     const plan = [];
 
+    const canUpload = this.settings.syncMode !== 'download';
+    const canDownload = this.settings.syncMode !== 'upload';
+
     // Consider both directions
     const rels = new Set([...localMap.keys(), ...remoteMap.keys()]);
     for (const rel of rels) {
       const loc = localMap.get(rel);
       const rem = remoteMap.get(rel);
       const idx = this.index.files[rel];
-      const canUpload = this.settings.syncMode !== 'download';
-      const canDownload = this.settings.syncMode !== 'upload';
 
       if (loc && !rem) {
         if (canUpload) plan.push({ type: 'upload', rel, from: loc, toAbs: this.remoteAbs(rel) });
