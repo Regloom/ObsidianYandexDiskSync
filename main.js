@@ -675,20 +675,18 @@ class YandexDiskSyncPlugin extends Plugin {
     this._progressModal = null;
   }
 
-  getLang() {
+  detectLocale() {
     try {
       const apiLang = typeof getLanguage === 'function' ? getLanguage() : 'en';
-      const code = String(apiLang || '').toLowerCase();
-      if (code.startsWith('ru')) return 'ru';
-      return 'en';
+      return String(apiLang || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
     } catch (_) {
       return 'en';
     }
   }
 
   t(key) {
-    const lang = this.getLang();
-    return (I18N[lang] && I18N[lang][key]) || (I18N.en && I18N.en[key]) || key;
+    this.locale ??= this.detectLocale(); // Cache locale on first use
+    return I18N[this.locale]?.[key] ?? I18N.en?.[key] ?? key;
   }
 
   isMobileDevice() {
