@@ -1,5 +1,4 @@
 const { Plugin, Notice, Modal, Setting, requestUrl, PluginSettingTab, TFile, TFolder, normalizePath, getLanguage, Platform } = require('obsidian');
-const crypto = require('crypto');
 
 const API_BASE = 'https://cloud-api.yandex.net/v1/disk';
 const INDEX_FILE_NAME = 'index.json';
@@ -171,11 +170,14 @@ function sanitizeIndexForHash(index) {
   return { lastSyncAt, files };
 }
 
-function computeIndexHash(index) {
+async function computeIndexHash(index) {
   try {
     const normalized = sanitizeIndexForHash(index || {});
     const json = JSON.stringify(normalized);
-    return crypto.createHash('sha1').update(json).digest('hex');
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(json));
+    return Array.from(new Uint8Array(buf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   } catch (_) {
     return null;
   }
@@ -749,7 +751,7 @@ class YandexDiskSyncPlugin extends Plugin {
     const storedMeta = data && typeof data.indexMeta === 'object' ? data.indexMeta : null;
     const { index, hash, existed } = await this.readIndexFile();
     this.index = index;
-    this.indexHash = hash || computeIndexHash(index);
+    this.indexHash = hash || await computeIndexHash(index);
     this.indexMeta = { hash: this.indexHash, version: INDEX_FILE_VERSION };
     if (!existed) {
       try {
@@ -837,7 +839,7 @@ class YandexDiskSyncPlugin extends Plugin {
     const adapter = this.app?.vault?.adapter;
     if (!adapter) {
       const empty = createEmptyIndex();
-      return { index: empty, hash: computeIndexHash(empty), existed: false };
+      return { index: empty, hash: await computeIndexHash(empty), existed: false };
     }
     try {
       const filePath = this.getIndexFilePath();
@@ -845,7 +847,7 @@ class YandexDiskSyncPlugin extends Plugin {
       if (!exists) {
         this._indexFileKnownExists = false;
         const empty = createEmptyIndex();
-        return { index: empty, hash: computeIndexHash(empty), existed: false };
+        return { index: empty, hash: await computeIndexHash(empty), existed: false };
       }
       const raw = await adapter.read(filePath);
       let parsed = {};
@@ -862,7 +864,7 @@ class YandexDiskSyncPlugin extends Plugin {
       for (const key of Object.keys(filesSource)) files[key] = filesSource[key];
       const lastSyncAt = typeof body.lastSyncAt === 'string' ? body.lastSyncAt : null;
       const index = { files, lastSyncAt };
-      const hash = computeIndexHash(index);
+      const hash = await computeIndexHash(index);
       this._indexFileKnownExists = true;
       return { index, hash, existed: true };
     } catch (e) {
@@ -886,12 +888,12 @@ class YandexDiskSyncPlugin extends Plugin {
     };
     await adapter.write(this.getIndexFilePath(), JSON.stringify(payload));
     this._indexFileKnownExists = true;
-    return computeIndexHash(payload);
+    return await computeIndexHash(payload);
   }
 
   async persistIndexIfNeeded(force = false) {
     const current = this.index && typeof this.index === 'object' ? this.index : createEmptyIndex();
-    const newHash = computeIndexHash(current);
+    const newHash = await computeIndexHash(current);
     let needWrite = force || !this.indexHash || this.indexHash !== newHash;
     if (!needWrite) {
       if (!this._indexFileKnownExists) {
