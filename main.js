@@ -227,55 +227,35 @@ class ProgressModal extends Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
-    this._timer = null;
+  }
+  createButton(toolbar, text, handler) {
+    const btn = toolbar.createEl('button', { text });
+    btn.onclick = handler;
+    return btn;
   }
   renderProgress() {
-    if (this.preEl) {
-      this.preEl.setText(this.plugin.getProgressSummary());
-    }
+    if (this.preEl) this.preEl.setText(this.plugin.getProgressSummary())
   }
   onOpen() {
     const { contentEl, modalEl, titleEl } = this;
     contentEl.empty();
     titleEl.setText('Yandex Disk Sync — Progress');
 
-    modalEl.addClass('yds-modal');
-    modalEl.addClass('yds-progress-modal');
+    modalEl.addClasses(['yds-modal', 'yds-progress-modal']);
     contentEl.addClass('yds-progress-content');
 
     const toolbar = contentEl.createEl('div', { cls: 'yds-progress-toolbar' });
 
-    const syncBtn = toolbar.createEl('button', { text: 'Sync now' });
-    syncBtn.onclick = () => {
-      if (this.plugin.currentRun?.active) { new Notice('Sync is already running'); return; }
-      this.plugin.syncNow(false);
-    };
-
-    const dryBtn = toolbar.createEl('button', { text: 'Dry-run' });
-    dryBtn.onclick = () => {
-      if (this.plugin.currentRun?.active) { new Notice('Sync is already running'); return; }
-      this.plugin.syncNow(true);
-    };
-
-    const copyBtn = toolbar.createEl('button', { text: 'Copy all' });
-    copyBtn.onclick = () => {
+    this.createButton(toolbar, 'Sync now', () => this.plugin.syncNow(false)); //syncNow checks for existing run and shows notice
+    this.createButton(toolbar, 'Dry-run',  () => this.plugin.syncNow(true));
+    this.createButton(toolbar, 'Copy all', () => {
       copyTextToClipboard(this.plugin.getProgressSummary(), 'Progress copied to clipboard', 'Copy failed');
-    };
+    });
+    this.createButton(toolbar, 'Cancel', () => this.plugin.cancelCurrentRun());
 
-    const cancelBtn = toolbar.createEl('button', { text: 'Cancel' });
-    cancelBtn.onclick = () => this.plugin.cancelCurrentRun();
-
-    const pre = (this.preEl = contentEl.createEl('pre', { cls: 'yds-modal-pre' }));
+    this.preEl = contentEl.createEl('pre', { cls: 'yds-modal-pre' });
 
     this.renderProgress();
-    if (!this._timer) {
-      this._timer = setInterval(() => this.renderProgress(), 500);
-      try {
-        if (this.plugin?.registerInterval) {
-          this.plugin.registerInterval(this._timer);
-        }
-      } catch (_) { }
-    }
   }
   onClose() {
     this.preEl = null;
@@ -615,6 +595,9 @@ class YandexDiskSyncSettingTab extends PluginSettingTab {
 }
 
 class YandexDiskSyncPlugin extends Plugin {
+
+  progressTimer = null;
+
   async onload() {
     this.log = [];
     this.index = createEmptyIndex();
@@ -671,17 +654,18 @@ class YandexDiskSyncPlugin extends Plugin {
   }
 
   onunload() {
-    try {
-      if (this._progressModal) this._progressModal.close();
-    } catch (_) { }
-    this._progressModal = null;
+    this.progressModal?.close();
+    this.progressModal = null;
+    this.stopProgressTimer();
   }
 
   detectLocale() {
     try {
-      const apiLang = typeof getLanguage === 'function' ? getLanguage() : 'en';
-      return String(apiLang || '').toLowerCase().startsWith('ru') ? 'ru' : 'en';
-    } catch (_) {
+      const lang = typeof getLanguage === 'function' 
+        ? getLanguage().toString().toLowerCase() 
+        : 'en'
+      return lang?.startsWith('ru') ? 'ru' : 'en';
+    } catch {
       return 'en';
     }
   }
@@ -993,8 +977,23 @@ class YandexDiskSyncPlugin extends Plugin {
   }
 
   openProgress() {
-    if (!this._progressModal) this._progressModal = new ProgressModal(this.app, this);
-    this._progressModal.open();
+    if (!this.progressModal) {
+      this.progressModal = new ProgressModal(this.app, this);
+    }
+    this.progressModal.open();
+  }
+
+  startProgressTimer() {
+    this.progressTimer ??= setInterval(
+      () => this.progressModal?.renderProgress(), 500
+    );
+  }
+
+  stopProgressTimer() {
+    if (this.progressTimer) {
+      clearInterval(this.progressTimer);
+      this.progressTimer = null;
+    }
   }
 
   startRun(dryRun, planCount = 0) {
@@ -1012,6 +1011,7 @@ class YandexDiskSyncPlugin extends Plugin {
       counts: { upload: { queued: 0, done: 0 }, download: { queued: 0, done: 0 }, del: { queued: 0, done: 0 }, conflict: { queued: 0, done: 0 } },
     };
     this.updateStatusBar('Planning');
+    this.startProgressTimer();
   }
 
   setRunPlan(plan) {
@@ -1039,6 +1039,8 @@ class YandexDiskSyncPlugin extends Plugin {
     r.active = false;
     r.endAt = Date.now();
     this.updateStatusBar(ok ? 'Done' : 'Error');
+    this.stopProgressTimer();
+    this.progressModal?.renderProgress();
   }
 
   cancelCurrentRun() {
