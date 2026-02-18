@@ -1491,6 +1491,10 @@ class YandexDiskSyncPlugin extends Plugin {
   }
 
   async ydEnsureFolder(absPath) {
+    // Cache to avoid duplicate API calls within the same sync run.
+    this._ensuredFolders ??= new Set();
+    if (this._ensuredFolders.has(absPath)) return;
+
     // Try to create; ignore 409 (already exists)
     const q = new URLSearchParams({ path: absPath });
     const url = `${API_BASE}/resources?${q.toString()}`;
@@ -1498,7 +1502,10 @@ class YandexDiskSyncPlugin extends Plugin {
       await this.http('PUT', url, { maxAttempts: 1, noRetryStatuses: [409] });
     } catch (e) {
       // If it's a 409, the folder already exists — safe to ignore
-      if ((e?.message || '').includes('HTTP 409')) return;
+      if ((e?.message || '').includes('HTTP 409')) {
+        this._ensuredFolders.add(absPath);
+        return;
+      }
       throw e;
     }
   }
