@@ -1393,17 +1393,27 @@ class YandexDiskSyncPlugin extends Plugin {
 
   async ydListFolderRecursive(basePath) {
     const files = [];
-    const stack = [basePath];
     const fields = '_embedded.items.name,_embedded.items.type,_embedded.items.path,_embedded.items.size,_embedded.items.md5,_embedded.items.sha256,_embedded.items.modified,_embedded.items.revision';
-    while (stack.length) {
-      const p = stack.pop();
-      let limit = 200, offset = 0;
+
+    // Directories are scanned in parallel batches (BFS wave order for convenient batching).
+    // The speed gain is significant compared to sequential scanning, especially for folders with many subdirs. 
+    // The concurrency is limited to avoid hitting API rate limits.
+    const DIR_CONCURRENCY = this.getEffectiveConcurrency('download', []);
+    const visited = new Set([basePath]);
+
+    const scanDir = async (p) => {
+      const subDirs = []; //result directories to scan in the next wave
+      const limit = 200;
+      let offset = 0;
       while (true) {
         const data = await this.ydGetResource(p, { limit, offset, fields });
         const items = data?._embedded?.items || [];
         for (const it of items) {
           if (it.type === 'dir') {
-            stack.push(it.path);
+            if (!visited.has(it.path)) {
+              visited.add(it.path);
+              subDirs.push(it.path);
+            }
           } else if (it.type === 'file') {
             files.push({
               path: it.path, // absolute on YD
@@ -1420,7 +1430,21 @@ class YandexDiskSyncPlugin extends Plugin {
         if (items.length < limit) break;
         offset += limit;
       }
+      return subDirs;
+    };
+    
+    // Breadth-First Search (BFS) wave by wave up to DIR_CONCURRENCY in parallel
+    let wave = [basePath];
+    while (wave.length > 0) {
+      const nextWave = [];
+      for (let i = 0; i < wave.length; i += DIR_CONCURRENCY) {
+        const batch = wave.slice(i, i + DIR_CONCURRENCY);
+        const results = await Promise.all(batch.map((p) => scanDir(p)));
+        for (const subDirs of results) nextWave.push(...subDirs);
+      }
+      wave = nextWave;
     }
+
     return files;
   }
 
